@@ -3,6 +3,7 @@ import folium
 from matplotlib import pyplot as plt
 import numpy as np
 
+
 class FitObj:
     def get_group(self):
         return {
@@ -16,8 +17,9 @@ class FitObj:
         self.set_config(name, start, end, strip, save)
 
     def set_config(self, name, start, end, strip, save):
-        self.name = "data/"+name
-        self.fitfile = fitparse.FitFile(self.name + '.fit')
+        self.name = name
+        self.file_name = "data/" + self.name
+        self.fitfile = fitparse.FitFile(self.file_name + '.fit')
         self.start = start
         self.end = end
         self.save = save
@@ -35,8 +37,13 @@ class FitObj:
         self.speed_list = []
         self.rpm_list = []
         self.hpm_list = []
-        self.jpg_file = self.name + '.jpg'
-        self.html_file = self.name + '.html'
+        self.dis_list = []
+        self.alt_list = []
+        self.altitude_jpg_file = "image/" + self.name + '.altitude.jpg'
+        self.jpg_file = "image/" + self.name + '.jpg'
+        self.html_file = self.file_name + '.html'
+        self.first_time = None
+        self.end_time = None
 
     def parse(self):
         # incidents = folium.map.FeatureGroup()
@@ -44,6 +51,8 @@ class FitObj:
         # 计数
         count = 0
         first = 0
+        distance = 0
+
         # 迭代
         for record in self.fitfile.get_messages("record"):
             count += 1
@@ -55,6 +64,14 @@ class FitObj:
             long = record.get('position_long').value
             if lat is None or long is None:
                 continue
+
+            if distance == 0:
+                distance = record.get('distance').value
+
+            self.dis_list.append((record.get('distance').value - distance) / 1000)
+            self.alt_list.append(record.get('altitude').value)
+            if record.get('altitude').value > 235 :
+                print(count)
 
             # 转换坐标
             lat, long = self.semicircles_to_degrees(lat), self.semicircles_to_degrees(long)
@@ -70,10 +87,9 @@ class FitObj:
             if self.center_lon_max < long or self.center_lon_max == 0:
                 self.center_lon_max = long
 
-
             # 当没有筛选区间,则跳过10个的数据,防止过大
             if self.start == 0 and self.end == 0:
-                self.strip = 10
+                self.strip = 15
             if self.strip != 0 and count % self.strip != 0:
                 continue
 
@@ -83,8 +99,9 @@ class FitObj:
             time = record.get('timestamp').value
             if first == 0:
                 first = int(time.timestamp())
+                self.first_time = time
             self.x.append(int(time.timestamp()) - first)
-
+            self.end_time = time
 
             # 获取数据
             for key, data in self.data_group.items():
@@ -103,12 +120,36 @@ class FitObj:
                 elif key == 'cadence':
                     rpm = res
                     self.rpm_list.append(res)
+
                 elif key == 'speed':
                     speed = res * 3.6
                     self.speed_list.append(res * 3.6)
 
+                times = time.strftime("%H:%M:%S")
                 self.Markers.append(
-                    folium.Marker([lat, long], popup='心率:{}\n踏频:{}\n速度:{} km/h'.format(hpm, rpm, round(speed,2))))
+                    folium.Marker([lat, long],
+                                  popup='心率:{}\n踏频:{}\n速度:{} km/h\n时间:{}'.format(hpm, rpm, round(speed, 2),
+                                                                                         count)))
+
+    def altitude(self):
+        fig, ax = plt.subplots()
+        ax.set_ylabel('m')
+        ax.set_xlabel('km')
+        # 最高
+        max_y = max(self.alt_list)
+        max_x = self.dis_list[self.alt_list.index(max_y)]
+        plt.text(max_x, max_y, f'dis:{round(max_y, 2)} m \nhigh:{round(max_x,2)} km')
+        # 最低
+        min_y = min(self.alt_list)
+        min_x = self.dis_list[self.alt_list.index(min_y)]
+        plt.text(min_x, min_y, f'{round(min_y, 2)}')
+
+        # plt.text(self.dis_list[-1], self.alt_list[-1], f'dis:{round(self.dis_list[-1], 2)}  \nhigh:{round(self.alt_list[-1], 2)}')
+        # plt.text(self.dis_list[0], self.alt_list[0], f'dis:{round(self.dis_list[0], 2)}  \nhigh:{round(self.alt_list[0], 2)}')
+
+        ax.plot(self.dis_list, self.alt_list)
+        # 展示图形
+        plt.savefig(self.altitude_jpg_file)
 
     def table(self):
         # 创建第一条折线图
@@ -144,7 +185,7 @@ class FitObj:
         ax1.set_xlabel('second')
         # plt.xticks([])  # 禁用 x 轴坐标
         plt.locator_params(axis='x', nbins=25)
-        # plt.gcf().set_size_inches(15, 5) #长宽
+        plt.gcf().set_size_inches(15, 5)  # 长宽
         # 添加标题
         plt.title(self.name)
         # 展示图形
@@ -154,17 +195,20 @@ class FitObj:
         coordinate = [(self.center_lat_min + self.center_lat_max) / 2,
                       (self.center_lon_min + self.center_lon_max) / 2]
         world_map = folium.Map(zoom_start=16, location=coordinate)
+
+        layer2 = folium.FeatureGroup(name='描点数据')
         folium.Marker(coordinate,
                       icon=folium.Icon(color='red'),
-                      popup='平均心率:{}\r'
-                            '最大心率:{}\r'
-                            '最小心率:{}\r'
-                            '平均踏频:{}\r'
-                            '最大踏频:{}\r'
-                            '最小踏频:{}\r'
-                            '平均速度:{}km/h\r'
-                            '最大速度:{}km/h\r'
-                            '最小速度:{}km/h'.
+                      popup="""平均心率:{}
+                            最大心率:{}
+                            最小心率:{}
+                            平均踏频:{}
+                            最大踏频:{}
+                            最小踏频:{}
+                            平均速度:{}km/h
+                            最大速度:{}km/h
+                            最小速度:{}km/h
+                            时间:{}""".
                       format(
                           round(self.data_group['heart_rate']['sum'] / self.data_group['heart_rate']['count'], 2),
                           self.data_group['heart_rate']['max'], self.data_group['heart_rate']['min'],
@@ -173,10 +217,11 @@ class FitObj:
                           self.data_group['cadence']['max'], self.data_group['cadence']['min'],
 
                           round(self.data_group['speed']['sum'] / self.data_group['speed']['count'] * 3.6, 2),
-                          self.data_group['speed']['max'] * 3.6, self.data_group['speed']['min'] * 3.6,
-                      )).add_to(world_map)
+                          round(self.data_group['speed']['max'] * 3.6,2),
+                          round(self.data_group['speed']['min'] * 3.6,2),
 
-        layer2 = folium.FeatureGroup(name='描点数据')
+                          self.date2str(),
+                      )).add_to(world_map)
         for m in self.Markers:
             layer2.add_child(m)
         world_map.add_child(layer2)
@@ -185,10 +230,19 @@ class FitObj:
         layer1 = folium.FeatureGroup(name='rpm,rbm,km数据图')
         layer1.add_child(folium.Marker(
             location=[self.center_lat_max + 0.019, self.center_lon_max + 0.019],
+            draggable=True,
             icon=folium.CustomIcon(self.jpg_file, icon_size=(1000, 400)),  # 指定图片大小
-            popup='Marker',
         ))
         world_map.add_child(layer1)
+
+        # 数据图片2
+        layer2 = folium.FeatureGroup(name='海拔图')
+        layer2.add_child(folium.Marker(
+            location=[self.center_lat_max + 0.019, self.center_lon_max + 0.019],
+            draggable=True,
+            icon=folium.CustomIcon(self.altitude_jpg_file),  # 指定图片大小
+        ))
+        world_map.add_child(layer2)
 
         folium.LayerControl().add_to(world_map)
 
@@ -197,13 +251,29 @@ class FitObj:
         else:
             world_map.show_in_browser()
 
+    def date2str(self):
+        delta = self.end_time - self.first_time
+        total_seconds = delta.total_seconds()
+        if total_seconds < 60:
+            return f"{total_seconds} 秒"
+        elif total_seconds < 3600:
+            minutes = total_seconds / 60
+            return f"{minutes:.2f} 分钟"
+        elif total_seconds < 86400:
+            hours = total_seconds / 3600
+            return f"{hours:.2f} 小时"
+        else:
+            days = total_seconds / 86400
+            return f"{days:.2f} 天"
+
     # semicircles
     def semicircles_to_degrees(self, semicircles):
         return semicircles / (2 ** 31) * 180
 
 
 if __name__ == '__main__':
-    c = FitObj('huanglongdai', 0, 0, 0, save=True)
+    c = FitObj('baga', 4200, 5406, 6, save=True)
     c.parse()
     c.table()
+    c.altitude()
     c.finish()
