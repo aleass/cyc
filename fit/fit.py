@@ -1,3 +1,5 @@
+import argparse
+
 import fitparse
 import folium
 from matplotlib import pyplot as plt
@@ -12,11 +14,17 @@ class FitObj:
             'sum': 0,  # 合计
             'count': 0,  # 数量
         }
+    # file_name 文件名
+    # start 步进,用于指定区域数据
+    # end  步进
+    # strip 间隔,防止太多页面卡顿
+    # save 是否存储
+    # heart_rate_filter 心率过滤
+    def __init__(self, file_name, start, end, strip, save, heart_rate_filter) -> None:
+        self.set_config(file_name, start, end, strip, save, heart_rate_filter)
 
-    def __init__(self, name, start, end, strip, save) -> None:
-        self.set_config(name, start, end, strip, save)
-
-    def set_config(self, name, start, end, strip, save):
+    def set_config(self, name, start, end, strip, save,heart_rate_filter):
+        self.heart_rate_filter = heart_rate_filter
         self.name = name
         self.file_name = "data/" + self.name
         self.fitfile = fitparse.FitFile(self.file_name + '.fit')
@@ -68,10 +76,11 @@ class FitObj:
             if distance == 0:
                 distance = record.get('distance').value
 
-            self.dis_list.append((record.get('distance').value - distance) / 1000)
-            self.alt_list.append(record.get('altitude').value)
-            if record.get('altitude').value > 235 :
-                print(count)
+            if record.get('heart_rate').value <= self.heart_rate_filter:
+                continue
+            if record.get('altitude').value != None and record.get('distance').value != None:
+                self.dis_list.append((record.get('distance').value - distance) / 1000)
+                self.alt_list.append(record.get('altitude').value)
 
             # 转换坐标
             lat, long = self.semicircles_to_degrees(lat), self.semicircles_to_degrees(long)
@@ -129,7 +138,7 @@ class FitObj:
                 self.Markers.append(
                     folium.Marker([lat, long],
                                   popup='心率:{}\n踏频:{}\n速度:{} km/h\n时间:{}'.format(hpm, rpm, round(speed, 2),
-                                                                                         count)))
+                                                                                         times)))
 
     def altitude(self):
         fig, ax = plt.subplots()
@@ -138,15 +147,11 @@ class FitObj:
         # 最高
         max_y = max(self.alt_list)
         max_x = self.dis_list[self.alt_list.index(max_y)]
-        plt.text(max_x, max_y, f'dis:{round(max_y, 2)} m \nhigh:{round(max_x,2)} km')
+        plt.text(max_x, max_y, f'dis:{round(max_y, 2)} m \nhigh:{round(max_x, 2)} km')
         # 最低
         min_y = min(self.alt_list)
         min_x = self.dis_list[self.alt_list.index(min_y)]
         plt.text(min_x, min_y, f'{round(min_y, 2)}')
-
-        # plt.text(self.dis_list[-1], self.alt_list[-1], f'dis:{round(self.dis_list[-1], 2)}  \nhigh:{round(self.alt_list[-1], 2)}')
-        # plt.text(self.dis_list[0], self.alt_list[0], f'dis:{round(self.dis_list[0], 2)}  \nhigh:{round(self.alt_list[0], 2)}')
-
         ax.plot(self.dis_list, self.alt_list)
         # 展示图形
         plt.savefig(self.altitude_jpg_file)
@@ -208,6 +213,8 @@ class FitObj:
                             平均速度:{}km/h
                             最大速度:{}km/h
                             最小速度:{}km/h
+                            距离:{}km
+                            高度:{}m
                             时间:{}""".
                       format(
                           round(self.data_group['heart_rate']['sum'] / self.data_group['heart_rate']['count'], 2),
@@ -217,9 +224,10 @@ class FitObj:
                           self.data_group['cadence']['max'], self.data_group['cadence']['min'],
 
                           round(self.data_group['speed']['sum'] / self.data_group['speed']['count'] * 3.6, 2),
-                          round(self.data_group['speed']['max'] * 3.6,2),
-                          round(self.data_group['speed']['min'] * 3.6,2),
-
+                          round(self.data_group['speed']['max'] * 3.6, 2),
+                          round(self.data_group['speed']['min'] * 3.6, 2),
+                          self.dis_list[-1],
+                          self.alt_list[-1],
                           self.date2str(),
                       )).add_to(world_map)
         for m in self.Markers:
@@ -227,7 +235,7 @@ class FitObj:
         world_map.add_child(layer2)
 
         # 数据图片1
-        layer1 = folium.FeatureGroup(name='rpm,rbm,km数据图')
+        layer1 = folium.FeatureGroup(name='rpm,rbm,km数据图',show=False)
         layer1.add_child(folium.Marker(
             location=[self.center_lat_max + 0.019, self.center_lon_max + 0.019],
             draggable=True,
@@ -236,7 +244,7 @@ class FitObj:
         world_map.add_child(layer1)
 
         # 数据图片2
-        layer2 = folium.FeatureGroup(name='海拔图')
+        layer2 = folium.FeatureGroup(name='海拔图',show=False)
         layer2.add_child(folium.Marker(
             location=[self.center_lat_max + 0.019, self.center_lon_max + 0.019],
             draggable=True,
@@ -272,7 +280,26 @@ class FitObj:
 
 
 if __name__ == '__main__':
-    c = FitObj('baga', 4200, 5406, 6, save=True)
+    # file_name = input('fit文件名')
+    # if file_name == '':
+    #     print("错误:fit文件名空")
+    start = input('步进开始,用于指定区域数据,默认全部')
+    if start == '' :
+        start = 0
+
+    # end = int(input('步进结束'))
+    # strip = int(input('间隔,防止太多页面卡顿,默认10'))
+    # if strip == 0:
+    #     strip = 10
+    # # save = input('是否存储,默认是')
+    # # if save == '':
+    # save = True
+    #
+    # heart_rate_filter = int(input('心率过滤.默认0'))
+
+    # c = FitObj('pp', -1, -1, 5, True,170)
+    # c = FitObj('baga', 4200, 5406, 5, True,0)
+    c = FitObj('baga', -1, 5406, 10, True,160)
     c.parse()
     c.table()
     c.altitude()
