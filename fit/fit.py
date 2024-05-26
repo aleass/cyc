@@ -283,9 +283,9 @@ if __name__ == '__main__':
     # file_name = input('fit文件名')
     # if file_name == '':
     #     print("错误:fit文件名空")
-    start = input('步进开始,用于指定区域数据,默认全部')
-    if start == '' :
-        start = 0
+    # start = input('步进开始,用于指定区域数据,默认全部')
+    # if start == '' :
+    #     start = 0
 
     # end = int(input('步进结束'))
     # strip = int(input('间隔,防止太多页面卡顿,默认10'))
